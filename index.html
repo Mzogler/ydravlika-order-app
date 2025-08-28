@@ -79,6 +79,32 @@ const RAW_CSV_URL = "https://raw.githubusercontent.com/Mzogler/ydravlika-order-a
 
 /* Προαιρετικό override από query ?csv=... */
 function getCsvUrlFromQuery() { const p = new URLSearchParams(location.search); return p.get("csv"); }
+  // Κανονικοποίηση για ελληνικά: αφαιρεί τόνους, πεζά, και ενοποιεί σ/ς
+function norm(s){
+  if(!s) return '';
+  s = s.toLowerCase();
+
+  // Αφαίρεση τόνων (τονισμένων φωνηέντων)
+  const map = {
+    'ά':'α','έ':'ε','ή':'η','ί':'ι','ό':'ο','ύ':'υ','ώ':'ω',
+    'ϊ':'ι','ΐ':'ι','ϋ':'υ','ΰ':'υ',
+    'Ά':'α','Έ':'ε','Ή':'η','Ί':'ι','Ό':'ο','Ύ':'υ','Ώ':'ω',
+    'Ϊ':'ι','Ϋ':'υ'
+  };
+  s = s.replace(/[άέήίόύώϊΐϋΰΆΈΉΊΌΎΏΪΫ]/g, c => map[c] || c);
+
+  // Ενοποίηση τελικού σίγμα (ς -> σ)
+  s = s.replace(/ς/g, 'σ');
+
+  // Αφαίρεση extra διακριτικών (ασφαλιστική δικλείδα)
+  s = s.normalize('NFD').replace(/\p{Diacritic}+/gu, '');
+
+  // Βγάλ’ τα non-word σύμβολα από την αναζήτηση (προαιρετικό)
+  s = s.replace(/[^\p{Letter}\p{Number}\s]/gu, ' ');
+
+  return s.trim();
+}
+
 
 /* -------------------- State -------------------- */
 let ALL = [];     // [{Περιγραφή, Κατηγορία}]
@@ -99,9 +125,16 @@ async function loadCsv(url) {
 function human(n){ return new Intl.NumberFormat('el-GR').format(n); }
 
 function applyFilters() {
-  const q = document.getElementById('searchInput').value.trim().toLowerCase();
-  FILTERED = ALL.filter(r => (r['Περιγραφή']||'').toLowerCase().includes(q));
-  PAGE = 1; renderResults();
+  const qRaw = document.getElementById('searchInput').value.trim();
+  const q = norm(qRaw);
+  FILTERED = ALL.filter(r => {
+    const desc = norm(r['Περιγραφή']);
+    const cat  = norm(r['Κατηγορία']);
+    // ταιριάζει αν η αναζήτηση υπάρχει είτε στην περιγραφή είτε στην κατηγορία
+    return q === '' || desc.includes(q) || cat.includes(q);
+  });
+  PAGE = 1;
+  renderResults();
 }
 
 function paged() { const start = (PAGE-1)*PAGE_SIZE; return FILTERED.slice(start, start+PAGE_SIZE); }
