@@ -4,68 +4,268 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Κατάλογος Υδραυλικών – Παραγγελία</title>
+  <!-- UI -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- CSV parser -->
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <!-- PDF libs -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
   <style>
-    body { font-family: system-ui, sans-serif; }
-    .input { border:1px solid #ccc; border-radius:8px; padding:4px 8px; }
-    .btn { border:1px solid #ccc; border-radius:8px; padding:6px 12px; background:#fff; cursor:pointer; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    .input { border:1px solid #e5e7eb; border-radius:10px; padding:6px 10px; }
+    .btn { border:1px solid #e5e7eb; border-radius:10px; padding:8px 12px; background:#fff; cursor:pointer; }
     .btn-primary { background:#000; color:#fff; }
+    .row { padding:8px 10px; border-bottom:1px solid #f3f4f6; display:flex; gap:8px; align-items:center; justify-content:space-between; }
   </style>
 </head>
 <body class="p-4">
-  <h1 class="text-xl font-bold mb-4">Κατάλογος Υδραυλικών</h1>
-  <input id="searchInput" class="input w-full mb-2" placeholder="Αναζήτηση...">
-  <div id="results"></div>
-  <hr class="my-4">
-  <h2 class="font-bold">Καλάθι</h2>
-  <div id="cart"></div>
-  <button id="exportPdfBtn" class="btn btn-primary mt-2">Λήψη PDF</button>
-  <button id="sendEmailBtn" class="btn mt-2">Αποστολή Email</button>
+  <header class="mb-4 flex items-center justify-between">
+    <h1 class="text-xl font-bold">Κατάλογος Υδραυλικών</h1>
+    <div class="flex gap-2">
+      <button id="exportPdfBtn" class="btn btn-primary">Λήψη PDF</button>
+      <button id="sendEmailBtn" class="btn">Αποστολή Email</button>
+    </div>
+  </header>
+
+  <section class="mb-3">
+    <input id="searchInput" class="input w-full" placeholder="Αναζήτηση (π.χ. Βάνα, Φίλτρο, Σιφόνι)..." />
+    <p id="status" class="text-sm text-gray-500 mt-2"></p>
+  </section>
+
+  <main class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Αποτελέσματα -->
+    <section class="border rounded-2xl">
+      <div class="px-3 py-2 flex items-center justify-between bg-gray-50 border-b rounded-t-2xl">
+        <div class="text-sm text-gray-600">Αποτελέσματα: <span id="resultCount" class="font-semibold">0</span> (έως 250/σελίδα)</div>
+        <div class="flex items-center gap-2">
+          <button id="prevPage" class="btn text-sm">« Προηγ.</button>
+          <span id="pageInfo" class="text-sm"></span>
+          <button id="nextPage" class="btn text-sm">Επόμ. »</button>
+        </div>
+      </div>
+      <div id="results" class="max-h-[70vh] overflow-auto"></div>
+    </section>
+
+    <!-- Καλάθι -->
+    <aside class="space-y-4">
+      <div class="border rounded-2xl p-3">
+        <div class="flex items-center justify-between">
+          <h2 class="font-semibold">Καλάθι</h2>
+          <span id="cartCount" class="text-xs bg-gray-100 rounded-full px-2 py-1">0 είδη</span>
+        </div>
+        <div id="cart" class="mt-2 max-h-[60vh] overflow-auto"></div>
+        <div class="mt-3 grid grid-cols-2 gap-2">
+          <button id="clearCart" class="btn">Καθαρισμός</button>
+          <button id="downloadCartCsv" class="btn">Λήψη CSV Καλαθιού</button>
+        </div>
+      </div>
+
+      <div class="border rounded-2xl p-3">
+        <h3 class="font-semibold mb-2">Στοιχεία αποστολής email</h3>
+        <input id="custName" class="input w-full mb-2" placeholder="Ονοματεπώνυμο" />
+        <input id="custEmail" class="input w-full mb-2" placeholder="Email παραλήπτη" />
+        <textarea id="custNotes" class="input w-full" rows="3" placeholder="Σημειώσεις"></textarea>
+        <p class="text-xs text-gray-500 mt-2">Απαιτείται Netlify Function + SendGrid API Key.</p>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="mt-8 text-center text-xs text-gray-500">HEY MIR!!! • CSV → Web → PDF/Email</footer>
 
 <script>
-// -------------------- Settings --------------------
-const RAW_CSV_URL = "https://raw.githubusercontent.com/Mzogler/ydravlika-order-app/refs/heads/main/ydravlika_katholiko_teras_ALL.csv";
+/* -------------------- Settings -------------------- */
+const RAW_CSV_URL = "https://raw.githubusercontent.com/Mzogler/ydravlika-order-app/main/ydravlika_katholiko_teras_ALL.csv";
 
-// -------------------- State --------------------
-let ALL=[], CART=[];
+/* Προαιρετικό override από query ?csv=... */
+function getCsvUrlFromQuery() { const p = new URLSearchParams(location.search); return p.get("csv"); }
 
-async function loadCsv(url){
-  return new Promise((res,rej)=>{
-    Papa.parse(url,{download:true,header:true,complete:r=>res(r.data),error:rej});
+/* -------------------- State -------------------- */
+let ALL = [];     // [{Περιγραφή, Κατηγορία}]
+let FILTERED = [];
+let CART = JSON.parse(localStorage.getItem('cart') || '[]');
+let PAGE = 1;
+const PAGE_SIZE = 250;
+const statusEl = document.getElementById('status');
+
+/* -------------------- CSV Loading -------------------- */
+async function loadCsv(url) {
+  return new Promise((res, rej) => {
+    Papa.parse(url, { download: true, header: true, skipEmptyLines: true, complete: (r)=>res(r.data), error: rej });
   });
 }
-function render(){
-  const q=document.getElementById('searchInput').value.toLowerCase();
-  const rows=ALL.filter(r=>(r['Περιγραφή']||'').toLowerCase().includes(q));
-  document.getElementById('results').innerHTML=rows.slice(0,50).map(r=>
-    `<div>${r['Περιγραφή']} (${r['Κατηγορία']})
-      <button onclick='add(${JSON.stringify(r)})' class='btn text-sm'>+1</button>
-      <button onclick='add(${JSON.stringify(r)},10)' class='btn text-sm'>+10</button>
-    </div>`).join('');
-  document.getElementById('cart').innerHTML=CART.map(c=>
-    `<div>${c.desc} – ${c.qty}</div>`).join('');
+
+/* -------------------- Filtering & Rendering -------------------- */
+function human(n){ return new Intl.NumberFormat('el-GR').format(n); }
+
+function applyFilters() {
+  const q = document.getElementById('searchInput').value.trim().toLowerCase();
+  FILTERED = ALL.filter(r => (r['Περιγραφή']||'').toLowerCase().includes(q));
+  PAGE = 1; renderResults();
 }
-function add(r,q=1){const f=CART.find(x=>x.desc==r['Περιγραφή']); if(f)f.qty+=q; else CART.push({desc:r['Περιγραφή'],cat:r['Κατηγορία'],qty:q}); render();}
 
-document.getElementById('searchInput').oninput=render;
-document.getElementById('exportPdfBtn').onclick=()=>{
-  const { jsPDF }=window.jspdf; const doc=new jsPDF();
-  doc.text('Παραγγελία',10,10);
-  doc.autoTable({head:[['Περιγραφή','Κατηγορία','Ποσ.']],body:CART.map((c,i)=>[c.desc,c.cat,c.qty])});
-  doc.save('order.pdf');
-};
-document.getElementById('sendEmailBtn').onclick=async()=>{
-  const res=await fetch('/.netlify/functions/sendOrder',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:CART})});
-  alert(await res.text());
+function paged() { const start = (PAGE-1)*PAGE_SIZE; return FILTERED.slice(start, start+PAGE_SIZE); }
+
+function renderResults() {
+  const box = document.getElementById('results'); box.innerHTML = '';
+  const rows = paged();
+  rows.forEach(r => {
+    const key = (r['Περιγραφή']||'') + '|' + (r['Κατηγορία']||'');
+    const existing = CART.find(x => x.key === key);
+    const qtyVal = existing ? existing.qty : '';
+    const div = document.createElement('div');
+    div.className = 'row';
+    div.innerHTML = `
+      <div class="flex-1">
+        <div class="font-medium">${escapeHtml(r['Περιγραφή']||'')}</div>
+        <div class="text-xs text-gray-500">${escapeHtml(r['Κατηγορία']||'')}</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <input type="number" min="0" placeholder="0" value="${qtyVal}" class="input w-24 text-right qty" />
+      </div>`;
+    const qty = div.querySelector('.qty');
+    qty.addEventListener('input', () => syncQty(r, qty.value));
+    box.appendChild(div);
+  });
+  document.getElementById('resultCount').textContent = human(FILTERED.length);
+  document.getElementById('pageInfo').textContent = `${human(PAGE)} / ${human(Math.max(1, Math.ceil(FILTERED.length/PAGE_SIZE)))}`;
+}
+
+/* -------------------- Cart: bind qty per row -------------------- */
+function saveCart(){ localStorage.setItem('cart', JSON.stringify(CART)); renderCart(); }
+
+function syncQty(item, val){
+  const key = (item['Περιγραφή']||'') + '|' + (item['Κατηγορία']||'');
+  const n = parseInt(val, 10);
+  const idx = CART.findIndex(x => x.key === key);
+  if (!val || isNaN(n) || n <= 0) {
+    if (idx >= 0) { CART.splice(idx,1); saveCart(); }
+    return;
+  }
+  if (idx >= 0) { CART[idx].qty = n; }
+  else { CART.push({ key, desc: item['Περιγραφή']||'', cat: item['Κατηγορία']||'', qty: n }); }
+  saveCart();
+}
+
+function removeFromCart(key){ CART = CART.filter(x => x.key !== key); saveCart(); renderResults(); }
+
+function renderCart(){
+  const box = document.getElementById('cart'); box.innerHTML = '';
+  CART.forEach(it => {
+    const div = document.createElement('div');
+    div.className = 'row';
+    div.innerHTML = `
+      <div class="flex-1">
+        <div class="font-medium">${escapeHtml(it.desc)}</div>
+        <div class="text-xs text-gray-500">${escapeHtml(it.cat)}</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <input type="number" min="0" value="${it.qty}" class="input w-24 text-right qty" />
+        <button class="btn del">✕</button>
+      </div>`;
+    div.querySelector('.qty').oninput = (e)=> syncQty({ 'Περιγραφή': it.desc, 'Κατηγορία': it.cat }, e.target.value);
+    div.querySelector('.del').onclick = ()=> removeFromCart(it.key);
+    box.appendChild(div);
+  });
+  document.getElementById('cartCount').textContent = `${human(CART.length)} είδη`;
+}
+
+/* -------------------- PDF with Greek font -------------------- */
+async function loadGreekFont() {
+  // Βεβαιώσου ότι υπάρχει το αρχείο στο repo: /fonts/NotoSans-Regular.ttf
+  const resp = await fetch('/fonts/NotoSans-Regular.ttf');
+  if(!resp.ok) throw new Error('Font fetch failed');
+  const buf = await resp.arrayBuffer();
+  // convert to base64
+  let binary = '';
+  const bytes = new Uint8Array(buf);
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+async function exportPDF(){
+  try {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+
+    // Load & register Greek font
+    const base64 = await loadGreekFont();
+    doc.addFileToVFS('NotoSans-Regular.ttf', base64);
+    doc.addFont('NotoSans-Regular.ttf', 'NotoSans', 'normal');
+    doc.setFont('NotoSans');
+
+    const date = new Date().toLocaleString('el-GR');
+    doc.setFontSize(14); doc.text('Παραγγελία Υδραυλικών', 40, 40);
+    doc.setFontSize(10); doc.text(`Ημ/νία: ${date}`, 40, 58);
+
+    const rows = CART.map((x,i)=> [i+1, x.desc, x.cat, x.qty]);
+    doc.autoTable({
+      startY: 80,
+      head: [['#','Περιγραφή','Κατηγορία','Ποσ.']],
+      body: rows,
+      styles: { font: 'NotoSans', fontSize: 9 },
+      headStyles: { fillColor: [0,0,0] }
+    });
+
+    doc.save('paraggelia-ydravlika.pdf');
+  } catch(e){
+    console.error(e);
+    alert('Σφάλμα δημιουργίας PDF. Έλεγξε ότι υπάρχει το /fonts/NotoSans-Regular.ttf');
+  }
+}
+
+/* -------------------- Email (Netlify Function) -------------------- */
+async function sendEmail(){
+  const name = document.getElementById('custName').value.trim();
+  const email = document.getElementById('custEmail').value.trim();
+  const notes = document.getElementById('custNotes').value.trim();
+  if(!email){ alert('Συμπλήρωσε email παραλήπτη.'); return; }
+  if(CART.length===0){ alert('Το καλάθι είναι άδειο.'); return; }
+  const payload = { customer: { name, email, notes }, items: CART };
+  const res = await fetch('/.netlify/functions/sendOrder', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  });
+  if(res.ok) alert('Το email εστάλη!');
+  else alert('Αποτυχία αποστολής: ' + (await res.text()));
+}
+
+/* -------------------- Utils -------------------- */
+function escapeHtml(s){ return (s||'').replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* -------------------- Init -------------------- */
+document.getElementById('searchInput').oninput = applyFilters;
+document.getElementById('prevPage').onclick = ()=>{ if(PAGE>1){ PAGE--; renderResults(); } };
+document.getElementById('nextPage').onclick = ()=>{ if(PAGE < Math.ceil(FILTERED.length/PAGE_SIZE)){ PAGE++; renderResults(); } };
+document.getElementById('exportPdfBtn').onclick = exportPDF;
+document.getElementById('sendEmailBtn').onclick = sendEmail;
+document.getElementById('clearCart').onclick = ()=>{ CART=[]; saveCart(); renderResults(); };
+document.getElementById('downloadCartCsv').onclick = ()=>{
+  if(CART.length===0){ alert('Άδειο καλάθι'); return; }
+  const header = 'Περιγραφή,Κατηγορία,Ποσότητα\n';
+  const body = CART.map(x=>`"${(x.desc||'').replaceAll('"','""')}","${(x.cat||'').replaceAll('"','""')}",${x.qty}`).join('\n');
+  const blob = new Blob(["\ufeff"+header+body], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'paraggelia-cart.csv'; a.click();
 };
 
-// -------------------- Auto-load CSV --------------------
-(async()=>{
-  ALL=await loadCsv(RAW_CSV_URL);
-  render();
+/* Auto-load CSV (με fallback μήνυμα) */
+(async ()=>{
+  const url = getCsvUrlFromQuery() || RAW_CSV_URL;
+  try{
+    statusEl.textContent = 'Φόρτωση CSV...';
+    const data = await loadCsv(url);
+    ALL = data.map(r => ({ 'Περιγραφή': r['Περιγραφή']||r['description']||'', 'Κατηγορία': r['Κατηγορία']||r['category']||'' }));
+    statusEl.textContent = `Φορτώθηκαν ${human(ALL.length)} γραμμές από CSV.`;
+    applyFilters();  // θα καλέσει και renderResults
+    renderCart();
+  }catch(e){
+    console.error('CSV load error', e);
+    statusEl.classList.add('text-red-600');
+    statusEl.textContent = 'Αποτυχία φόρτωσης CSV! Ελέγξτε το URL ή το δίκτυο.';
+    alert('Αποτυχία φόρτωσης CSV! Ελέγξτε το URL ή το δίκτυο.');
+  }
 })();
 </script>
 </body>
