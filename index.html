@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Κατάλογος Υδραυλικών – Παραγγελία</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; }
+    .input { border:1px solid #ccc; border-radius:8px; padding:4px 8px; }
+    .btn { border:1px solid #ccc; border-radius:8px; padding:6px 12px; background:#fff; cursor:pointer; }
+    .btn-primary { background:#000; color:#fff; }
+  </style>
+</head>
+<body class="p-4">
+  <h1 class="text-xl font-bold mb-4">Κατάλογος Υδραυλικών</h1>
+  <input id="csvUrl" class="input w-full mb-2" placeholder="CSV URL από GitHub raw link">
+  <button id="loadCsvUrlBtn" class="btn">Φόρτωση</button>
+  <hr class="my-4">
+  <input id="searchInput" class="input w-full mb-2" placeholder="Αναζήτηση...">
+  <div id="results"></div>
+  <hr class="my-4">
+  <h2 class="font-bold">Καλάθι</h2>
+  <div id="cart"></div>
+  <button id="exportPdfBtn" class="btn btn-primary mt-2">Λήψη PDF</button>
+  <button id="sendEmailBtn" class="btn mt-2">Αποστολή Email</button>
+
+<script>
+let ALL=[], CART=[];
+async function loadCsv(url){
+  return new Promise((res,rej)=>{
+    Papa.parse(url,{download:true,header:true,complete:r=>res(r.data),error:rej});
+  });
+}
+function render(){
+  const q=document.getElementById('searchInput').value.toLowerCase();
+  const rows=ALL.filter(r=>(r['Περιγραφή']||'').toLowerCase().includes(q));
+  document.getElementById('results').innerHTML=rows.slice(0,50).map(r=>
+    `<div>${r['Περιγραφή']} (${r['Κατηγορία']})
+      <button onclick='add(${JSON.stringify(r)})' class='btn text-sm'>+1</button>
+      <button onclick='add(${JSON.stringify(r)},10)' class='btn text-sm'>+10</button>
+    </div>`).join('');
+  document.getElementById('cart').innerHTML=CART.map(c=>
+    `<div>${c.desc} – ${c.qty}</div>`).join('');
+}
+function add(r,q=1){const f=CART.find(x=>x.desc==r['Περιγραφή']); if(f)f.qty+=q; else CART.push({desc:r['Περιγραφή'],cat:r['Κατηγορία'],qty:q}); render();}
+document.getElementById('loadCsvUrlBtn').onclick=async()=>{
+  const url=document.getElementById('csvUrl').value.trim(); if(!url)return;
+  ALL=await loadCsv(url); render();
+};
+document.getElementById('searchInput').oninput=render;
+document.getElementById('exportPdfBtn').onclick=()=>{
+  const { jsPDF }=window.jspdf; const doc=new jsPDF();
+  doc.text('Παραγγελία',10,10);
+  doc.autoTable({head:[['Περιγραφή','Κατηγορία','Ποσ.']],body:CART.map((c,i)=>[c.desc,c.cat,c.qty])});
+  doc.save('order.pdf');
+};
+document.getElementById('sendEmailBtn').onclick=async()=>{
+  const res=await fetch('/.netlify/functions/sendOrder',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:CART})});
+  alert(await res.text());
+};
+</script>
+</body>
+</html>
