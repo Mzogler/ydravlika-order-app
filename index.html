@@ -3,12 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Κατάλογος Υδραυλικών – Παραγγελία (Auto-Columns)</title>
-  <!-- UI -->
+  <title>Κατάλογος Υδραυλικών – Παραγγελία (Robust CSV)</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- CSV parser -->
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  <!-- PDF libs -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
   <style>
@@ -17,7 +14,7 @@
     .btn { border:1px solid #e5e7eb; border-radius:10px; padding:8px 12px; background:#fff; cursor:pointer; }
     .btn-primary { background:#000; color:#fff; }
     .row { padding:8px 10px; border-bottom:1px solid #f3f4f6; display:flex; gap:8px; align-items:center; justify-content:space-between; }
-    .badge { font-size: 11px; background:#f3f4f6; border-radius: 999px; padding: 2px 8px; }
+    .badge { font-size: 11px; background:#f3f4f6; border-radius:999px; padding:2px 8px; }
   </style>
 </head>
 <body class="p-4">
@@ -42,7 +39,6 @@
   </section>
 
   <main class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-    <!-- Αποτελέσματα -->
     <section class="border rounded-2xl">
       <div class="px-3 py-2 flex items-center justify-between bg-gray-50 border-b rounded-t-2xl">
         <div class="text-sm text-gray-600">Αποτελέσματα: <span id="resultCount" class="font-semibold">0</span></div>
@@ -51,7 +47,6 @@
       <div id="results" class="max-h-[70vh] overflow-auto"></div>
     </section>
 
-    <!-- Καλάθι -->
     <aside class="space-y-4">
       <div class="border rounded-2xl p-3">
         <div class="flex items-center justify-between">
@@ -75,18 +70,18 @@
     </aside>
   </main>
 
-  <footer class="mt-8 text-center text-xs text-gray-500">George Toliakis</footer>
+  <footer class="mt-8 text-center text-xs text-gray-500">HEY MIR!!! • CSV → Web → PDF/Email</footer>
 
 <script>
-/* ---------------- CSV sources (με fallbacks) ---------------- */
+/* ---------- CSV SOURCES ---------- */
 const CSV_SOURCES = [
   "/data/ydravlika_katholiko_teras_ALL.csv",
   "https://raw.githubusercontent.com/Mzogler/ydravlika-order-app/main/ydravlika_katholiko_teras_ALL.csv",
   "https://cdn.jsdelivr.net/gh/Mzogler/ydravlika-order-app@main/ydravlika_katholiko_teras_ALL.csv"
 ];
 
-/* ---------------- State ---------------- */
-let ALL = [];         // [{Περιγραφή, Κατηγορία, _nDesc, _nCat}]
+/* ---------- STATE ---------- */
+let ALL = [];  // [{Περιγραφή, Κατηγορία, _nDesc, _nCat}]
 let FILTERED = [];
 let CART = JSON.parse(localStorage.getItem('cart') || '[]');
 let PAGE = 1;
@@ -97,10 +92,10 @@ const resultsEl = document.getElementById('results');
 const resultCountEl = document.getElementById('resultCount');
 const pageInfoEl = document.getElementById('pageInfo');
 
-/* ---------------- Normalize Greek (no tones/case, ς→σ) ---------------- */
+/* ---------- NORMALIZE ---------- */
 function norm(s){
   if(!s) return '';
-  s = s.replace(/^\ufeff/, ''); // strip BOM if any
+  s = s.replace(/^\ufeff/, ''); // strip BOM
   s = s.toLowerCase()
        .replace(/ά/g,'α').replace(/έ/g,'ε').replace(/ή/g,'η')
        .replace(/ί/g,'ι').replace(/ό/g,'ο').replace(/ύ/g,'υ')
@@ -110,177 +105,139 @@ function norm(s){
   return s.trim();
 }
 
-/* ---------------- Guess column names (handles Greek/English/BOM) ---------------- */
-function guessColumns(row){
-  // Take keys, normalize, and map to canonical "desc"/"cat"
-  const keys = Object.keys(row||{});
-  const map = {};
-  for(const k of keys){
-    const nk = norm(k).replace(/[^a-zα-ω0-9]/g,''); // strip spaces/punct after norm
-    map[nk] = k; // keep original
-  }
-  // Candidate sets
-  const descCandidates = [
-    'περιγραφη','perigrafi','perigrafh','perigraf','perig','desc','descr','description'
-  ];
-  const catCandidates  = [
-    'κατηγορια','katigoria','kathgoria','category','cat'
-  ];
-  let descKey=null, catKey=null;
-  for(const c of descCandidates){ if(map[c]) { descKey = map[c]; break; } }
-  for(const c of catCandidates){  if(map[c]) { catKey  = map[c]; break; } }
-
-  // Fallback: try partial matches
-  if(!descKey){
-    const maybe = Object.entries(map).find(([nk,orig])=> nk.includes('perigr') || nk.includes('desc') || nk.includes('perigraf'));
-    if(maybe) descKey = maybe[1];
-  }
-  if(!catKey){
-    const maybe = Object.entries(map).find(([nk,orig])=> nk.includes('katig') || nk.includes('kathg') || nk.includes('categ'));
-    if(maybe) catKey = maybe[1];
-  }
-
-  return { descKey, catKey, seenHeaders: keys };
+/* ---------- FETCH CSV TEXT (with timeout & checks) ---------- */
+async function fetchText(url, timeoutMs=12000){
+  const ctrl = new AbortController();
+  const t = setTimeout(()=>ctrl.abort(), timeoutMs);
+  try{
+    const bust = url + (url.includes('?') ? '&' : '?') + 'nocache=' + Date.now();
+    const resp = await fetch(bust, { signal: ctrl.signal, credentials: 'same-origin' });
+    if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const text = await resp.text();
+    // Basic sanity: must have at least a comma or semicolon and a newline
+    if(!/[\n\r].+[,;].+/.test(text)) throw new Error('Not CSV content (maybe HTML/empty)');
+    return text;
+  } finally { clearTimeout(t); }
 }
 
-/* ---------------- Safe CSV loader with fallbacks (Papa worker) ---------------- */
-function papaLoad(url){
-  return new Promise((resolve, reject)=>{
-    Papa.parse(url, {
-      download:true, header:true, skipEmptyLines:true, worker:true,
+/* ---------- PARSE CSV STRING VIA PAPA ---------- */
+function parseCsvString(csvText){
+  return new Promise((resolve,reject)=>{
+    Papa.parse(csvText, { header:true, skipEmptyLines:true, worker:true,
       complete: r => resolve(r.data),
-      error:    err => reject(err)
+      error: e => reject(e)
     });
   });
 }
+
+/* ---------- TRY SOURCES SEQUENTIALLY ---------- */
 async function loadCsvWithFallback(){
-  let lastErr=null;
-  for(const baseUrl of CSV_SOURCES){
-    const url = baseUrl + (baseUrl.includes("?") ? "&" : "?") + "nocache=" + Date.now();
+  let lastErr = null;
+  for(const src of CSV_SOURCES){
     try{
-      statusEl.textContent = "Φόρτωση CSV από: " + baseUrl;
-      const data = await papaLoad(url);
-      if(Array.isArray(data) && data.length) return data;
-      lastErr = new Error("Empty data from " + baseUrl);
-    }catch(e){ lastErr=e; }
+      statusEl.textContent = "Φόρτωση CSV από: " + src;
+      console.log('[CSV] trying', src);
+      const txt = await fetchText(src);
+      const data = await parseCsvString(txt);
+      if(Array.isArray(data) && data.length){ return data; }
+      lastErr = new Error('Empty parsed data from '+src);
+    }catch(e){
+      console.warn('[CSV] source failed', src, e);
+      lastErr = e;
+    }
   }
-  throw lastErr || new Error("All CSV sources failed");
+  throw lastErr || new Error('All CSV sources failed');
 }
 
-/* ---------------- Filtering (debounced) ---------------- */
+/* ---------- GUESS COLUMNS ---------- */
+function guessColumns(row){
+  const keys = Object.keys(row||{});
+  const map = {};
+  for(const k of keys){
+    const nk = norm(k).replace(/[^a-zα-ω0-9]/g,'');
+    map[nk] = k;
+  }
+  const descCands = ['περιγραφη','perigrafi','perigrafh','desc','descr','description','perigraf'];
+  const catCands  = ['κατηγορια','katigoria','kathgoria','category','cat','categ'];
+  let descKey=null, catKey=null;
+  for(const c of descCands){ if(map[c]) { descKey = map[c]; break; } }
+  for(const c of catCands){  if(map[c]) { catKey  = map[c]; break; } }
+  if(!descKey){
+    const m = Object.entries(map).find(([nk])=> nk.includes('perigr')||nk.includes('desc')||nk.includes('perigraf'));
+    if(m) descKey = m[1];
+  }
+  if(!catKey){
+    const m = Object.entries(map).find(([nk])=> nk.includes('katig')||nk.includes('kathg')||nk.includes('categ'));
+    if(m) catKey = m[1];
+  }
+  return { descKey, catKey, seenHeaders: keys };
+}
+
+/* ---------- FILTER (debounce) ---------- */
 let debounceTimer=null;
-function applyFiltersDebounced(){
-  clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(applyFilters, 200);
-}
-function applyFilters() {
+function applyFiltersDebounced(){ clearTimeout(debounceTimer); debounceTimer=setTimeout(applyFilters, 200); }
+function applyFilters(){
   const q = norm(document.getElementById('searchInput').value.trim());
-  if (q === '') {
-    FILTERED = ALL;
-  } else {
-    FILTERED = ALL.filter(r => r._nDesc.includes(q) || r._nCat.includes(q));
-  }
-  PAGE = 1;
-  renderPage();
+  FILTERED = q==='' ? ALL : ALL.filter(r => r._nDesc.includes(q) || r._nCat.includes(q));
+  PAGE = 1; renderPage();
 }
 
-/* ---------------- Paging helpers ---------------- */
-function pageCount(){ return Math.max(1, Math.ceil(FILTERED.length / PAGE_SIZE)); }
-function pageSlice(){
-  const start = (PAGE-1)*PAGE_SIZE;
-  return FILTERED.slice(start, start+PAGE_SIZE);
-}
-
-/* ---------------- Render results (fast) ---------------- */
+/* ---------- PAGINATION / RENDER ---------- */
+function pageCount(){ return Math.max(1, Math.ceil(FILTERED.length/200)); }
+function pageSlice(){ const s=(PAGE-1)*200; return FILTERED.slice(s, s+200); }
 function renderPage(){
   resultsEl.innerHTML = '';
   const frag = document.createDocumentFragment();
-  const rows = pageSlice();
-
-  for (let i=0; i<rows.length; i++) {
-    const r = rows[i];
-    const key = r['Περιγραφή'] + '|' + r['Κατηγορία'];
-    const found = CART.find(x => x.key === key);
+  for(const r of pageSlice()){
+    const key = r['Περιγραφή']+'|'+r['Κατηγορία'];
+    const found = CART.find(x=>x.key===key);
     const qtyVal = found ? found.qty : '';
-
-    const div = document.createElement('div');
-    div.className = 'row';
-
-    const left = document.createElement('div');
-    left.className = 'flex-1';
-    const title = document.createElement('div');
-    title.className = 'font-medium';
-    title.textContent = r['Περιγραφή'];
-    const sub = document.createElement('div');
-    sub.className = 'text-xs text-gray-500';
-    sub.textContent = r['Κατηγορία'];
-    left.appendChild(title); left.appendChild(sub);
-
-    const qty = document.createElement('input');
-    qty.type = 'number'; qty.min = '0';
-    qty.placeholder = '0';
-    qty.value = qtyVal;
-    qty.className = 'input w-20 text-right qty';
-    qty.addEventListener('input', ()=> syncQty(r, qty.value));
-
-    div.appendChild(left);
-    div.appendChild(qty);
+    const div = document.createElement('div'); div.className='row';
+    const left = document.createElement('div'); left.className='flex-1';
+    const t = document.createElement('div'); t.className='font-medium'; t.textContent=r['Περιγραφή'];
+    const s = document.createElement('div'); s.className='text-xs text-gray-500'; s.textContent=r['Κατηγορία'];
+    left.appendChild(t); left.appendChild(s);
+    const qty = document.createElement('input'); qty.type='number'; qty.min='0'; qty.placeholder='0'; qty.value=qtyVal; qty.className='input w-20 text-right qty';
+    qty.addEventListener('input', ()=>syncQty(r, qty.value));
+    div.appendChild(left); div.appendChild(qty);
     frag.appendChild(div);
   }
-
   resultsEl.appendChild(frag);
-
   resultCountEl.textContent = FILTERED.length.toLocaleString('el-GR');
   pageInfoEl.textContent = `${PAGE} / ${pageCount()}`;
 }
 
-/* ---------------- Cart ---------------- */
+/* ---------- CART ---------- */
 function saveCart(){ localStorage.setItem('cart', JSON.stringify(CART)); renderCart(); }
 function syncQty(item,val){
-  const key = item['Περιγραφή']+'|'+item['Κατηγορία'];
-  const n = parseInt(val,10);
-  const idx = CART.findIndex(x=>x.key===key);
-  if(!val || isNaN(n) || n<=0){ if(idx>=0){ CART.splice(idx,1); saveCart(); } return; }
+  const key=item['Περιγραφή']+'|'+item['Κατηγορία'];
+  const n=parseInt(val,10);
+  const idx=CART.findIndex(x=>x.key===key);
+  if(!val||isNaN(n)||n<=0){ if(idx>=0){ CART.splice(idx,1); saveCart(); } return; }
   if(idx>=0) CART[idx].qty=n; else CART.push({key,desc:item['Περιγραφή'],cat:item['Κατηγορία'],qty:n});
   saveCart();
 }
 function renderCart(){
-  const box = document.getElementById('cart'); box.innerHTML='';
-  const frag = document.createDocumentFragment();
-  for (let i=0;i<CART.length;i++){
-    const it = CART[i];
-    const div = document.createElement('div');
-    div.className = 'row';
-
-    const left = document.createElement('div');
-    left.className = 'flex-1';
-    const t = document.createElement('div');
-    t.className = 'font-medium';
-    t.textContent = it.desc;
-    const s = document.createElement('div');
-    s.className = 'text-xs text-gray-500';
-    s.textContent = it.cat;
+  const box=document.getElementById('cart'); box.innerHTML='';
+  const frag=document.createDocumentFragment();
+  for(const it of CART){
+    const div=document.createElement('div'); div.className='row';
+    const left=document.createElement('div'); left.className='flex-1';
+    const t=document.createElement('div'); t.className='font-medium'; t.textContent=it.desc;
+    const s=document.createElement('div'); s.className='text-xs text-gray-500'; s.textContent=it.cat;
     left.appendChild(t); left.appendChild(s);
-
-    const right = document.createElement('div');
-    right.className = 'flex items-center gap-2';
-    const qty = document.createElement('input');
-    qty.type='number'; qty.min='0'; qty.value=it.qty; qty.className='input w-20 text-right qty';
-    qty.oninput = (e)=> syncQty({ 'Περιγραφή':it.desc, 'Κατηγορία':it.cat }, e.target.value);
-    const del = document.createElement('button');
-    del.className='btn del'; del.textContent='✕';
-    del.onclick = ()=>{ CART = CART.filter(x=>x.key!==it.key); saveCart(); renderPage(); };
-
-    right.appendChild(qty); right.appendChild(del);
-
+    const right=document.createElement('div'); right.className='flex items-center gap-2';
+    const q=document.createElement('input'); q.type='number'; q.min='0'; q.value=it.qty; q.className='input w-20 text-right qty'; q.oninput=(e)=>syncQty({'Περιγραφή':it.desc,'Κατηγορία':it.cat}, e.target.value);
+    const del=document.createElement('button'); del.className='btn del'; del.textContent='✕'; del.onclick=()=>{ CART=CART.filter(x=>x.key!==it.key); saveCart(); renderPage(); };
+    right.appendChild(q); right.appendChild(del);
     div.appendChild(left); div.appendChild(right);
     frag.appendChild(div);
   }
   box.appendChild(frag);
-  document.getElementById('cartCount').textContent = `${CART.length} είδη`;
+  document.getElementById('cartCount').textContent=`${CART.length} είδη`;
 }
 
-/* ---------------- PDF (Greek font) ---------------- */
+/* ---------- PDF (Greek font) ---------- */
 async function loadGreekFont(){
   const resp=await fetch('/fonts/NotoSans-Regular.ttf');
   if(!resp.ok) throw new Error('Font fetch failed');
@@ -297,21 +254,16 @@ async function exportPDF(){
     doc.addFileToVFS('NotoSans-Regular.ttf',base64);
     doc.addFont('NotoSans-Regular.ttf','NotoSans','normal');
     doc.setFont('NotoSans');
-
-    const date = new Date().toLocaleString('el-GR');
+    const date=new Date().toLocaleString('el-GR');
     doc.setFontSize(14); doc.text('Παραγγελία Υδραυλικών',40,40);
     doc.setFontSize(10); doc.text(`Ημ/νία: ${date}`,40,58);
-
     const rows=CART.map((x,i)=>[i+1,x.desc,x.cat,x.qty]);
-    doc.autoTable({ startY:80, head:[['#','Περιγραφή','Κατηγορία','Ποσ.']], body:rows, styles:{font:'NotoSans',fontSize:9}, headStyles:{fillColor:[0,0,0]} });
+    doc.autoTable({startY:80,head:[['#','Περιγραφή','Κατηγορία','Ποσ.']],body:rows,styles:{font:'NotoSans',fontSize:9},headStyles:{fillColor:[0,0,0]}});
     doc.save('paraggelia.pdf');
-  }catch(e){
-    console.error(e);
-    alert('Σφάλμα PDF: '+e.message+' (Έλεγξε ότι υπάρχει το /fonts/NotoSans-Regular.ttf)');
-  }
+  }catch(e){ alert('Σφάλμα PDF: '+e.message+' (έλεγξε /fonts/NotoSans-Regular.ttf)'); }
 }
 
-/* ---------------- Email ---------------- */
+/* ---------- EMAIL ---------- */
 async function sendEmail(){
   const name=document.getElementById('custName').value.trim();
   const email=document.getElementById('custEmail').value.trim();
@@ -323,7 +275,10 @@ async function sendEmail(){
   if(res.ok) alert('Email στάλθηκε'); else alert('Αποτυχία: '+await res.text());
 }
 
-/* ---------------- Events ---------------- */
+/* ---------- EVENTS ---------- */
+document.getElementById('searchInput').addEventListener('input', ()=>applyFiltersDebounced());
+document.getElementById('prevPage').onclick=()=>{ if(PAGE>1){ PAGE--; renderPage(); } };
+document.getElementById('nextPage').onclick=()=>{ const pc=Math.max(1,Math.ceil(FILTERED.length/200)); if(PAGE<pc){ PAGE++; renderPage(); } };
 document.getElementById('exportPdfBtn').onclick=exportPDF;
 document.getElementById('sendEmailBtn').onclick=sendEmail;
 document.getElementById('clearCart').onclick=()=>{ CART=[]; saveCart(); renderPage(); };
@@ -334,24 +289,28 @@ document.getElementById('downloadCartCsv').onclick=()=>{
   const blob=new Blob(["\ufeff"+header+body],{type:'text/csv;charset=utf-8;'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='cart.csv'; a.click();
 };
-document.getElementById('searchInput').addEventListener('input', applyFiltersDebounced);
-document.getElementById('prevPage').onclick=()=>{ if(PAGE>1){ PAGE--; renderPage(); } };
-document.getElementById('nextPage').onclick=()=>{ if(PAGE<pageCount()){ PAGE++; renderPage(); } };
 
-/* ---------------- Auto-load CSV + auto-column mapping ---------------- */
+/* ---------- BOOT ---------- */
 (async()=>{
   try{
     statusEl.textContent='Φόρτωση CSV...';
-    const data=await loadCsvWithFallback();
-
-    const sample=data && data[0] || {};
-    const { descKey, catKey, seenHeaders } = guessColumns(sample);
+    const data = await loadCsvWithFallback();
+    const sample = data && data[0] || {};
+    const { descKey, catKey, seenHeaders } = (function guess(row){
+      const keys = Object.keys(row||{});
+      const map = {}; for(const k of keys){ const nk = norm(k).replace(/[^a-zα-ω0-9]/g,''); map[nk]=k; }
+      const dC=['περιγραφη','perigrafi','perigrafh','desc','descr','description','perigraf'];
+      const cC=['κατηγορια','katigoria','kathgoria','category','cat','categ'];
+      let dk=null, ck=null;
+      for(const c of dC){ if(map[c]){ dk=map[c]; break; } }
+      for(const c of cC){ if(map[c]){ ck=map[c]; break; } }
+      if(!dk){ const m=Object.entries(map).find(([nk])=> nk.includes('perigr')||nk.includes('desc')||nk.includes('perigraf')); if(m) dk=m[1]; }
+      if(!ck){ const m=Object.entries(map).find(([nk])=> nk.includes('katig')||nk.includes('kathg')||nk.includes('categ')); if(m) ck=m[1]; }
+      return {descKey:dk, catKey:ck, seenHeaders:keys};
+    })(sample);
 
     if(!descKey || !catKey){
-      throw new Error(
-        'Δεν βρέθηκαν στήλες περιγραφής/κατηγορίας. Βρέθηκαν headers: '+
-        JSON.stringify(seenHeaders)
-      );
+      throw new Error('Δεν βρέθηκαν στήλες περιγραφής/κατηγορίας. Βρέθηκαν: '+JSON.stringify(seenHeaders));
     }
 
     ALL = data.map(r=>{
@@ -359,15 +318,14 @@ document.getElementById('nextPage').onclick=()=>{ if(PAGE<pageCount()){ PAGE++; 
       const c = (r[catKey]  ?? '').toString();
       return {'Περιγραφή': d, 'Κατηγορία': c, _nDesc: norm(d), _nCat: norm(c)};
     });
-
     FILTERED = ALL;
-    statusEl.textContent=`Φορτώθηκαν ${ALL.length.toLocaleString('el-GR')} γραμμές.`;
+    statusEl.textContent = `Φορτώθηκαν ${ALL.length.toLocaleString('el-GR')} γραμμές.`;
     renderPage(); renderCart();
   }catch(e){
     console.error('CSV load error', e);
     statusEl.classList.add('text-red-600');
-    statusEl.textContent='Αποτυχία φόρτωσης CSV! '+(e?.message||'');
-    alert('Αποτυχία φόρτωσης CSV! '+(e?.message||''));
+    statusEl.textContent = 'Αποτυχία φόρτωσης CSV! ' + (e?.message||'');
+    alert('Αποτυχία φόρτωσης CSV! ' + (e?.message||''));
   }
 })();
 </script>
