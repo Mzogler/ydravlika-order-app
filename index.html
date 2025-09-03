@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Κατάλογος Υδραυλικών – Παραγγελία (Dual Schema + Robust)</title>
+  <title>Κατάλογος Υδραυλικών – Παραγγελία (Merge 2 CSVs)</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -22,7 +22,6 @@
     <h1 class="text-xl font-bold">Κατάλογος Υδραυλικών</h1>
     <div class="flex gap-2">
       <button id="exportPdfBtn" class="btn btn-primary">Λήψη PDF</button>
-      <button id="sendEmailBtn" class="btn">Αποστολή Email</button>
     </div>
   </header>
 
@@ -39,6 +38,7 @@
   </section>
 
   <main class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Αποτελέσματα -->
     <section class="border rounded-2xl">
       <div class="px-3 py-2 flex items-center justify-between bg-gray-50 border-b rounded-t-2xl">
         <div class="text-sm text-gray-600">Αποτελέσματα: <span id="resultCount" class="font-semibold">0</span></div>
@@ -47,6 +47,7 @@
       <div id="results" class="max-h-[70vh] overflow-auto"></div>
     </section>
 
+    <!-- Καλάθι -->
     <aside class="space-y-4">
       <div class="border rounded-2xl p-3">
         <div class="flex items-center justify-between">
@@ -59,45 +60,41 @@
           <button id="downloadCartCsv" class="btn">Λήψη CSV Καλαθιού</button>
         </div>
       </div>
-
-      <div class="border rounded-2xl p-3">
-        <h3 class="font-semibold mb-2">Στοιχεία αποστολής email</h3>
-        <input id="custName" class="input w-full mb-2" placeholder="Ονοματεπώνυμο" />
-        <input id="custEmail" class="input w-full mb-2" placeholder="Email παραλήπτη" />
-        <textarea id="custNotes" class="input w-full" rows="3" placeholder="Σημειώσεις"></textarea>
-        <p class="text-xs text-gray-500 mt-2">.</p>
-      </div>
     </aside>
   </main>
 
-  <footer class="mt-8 text-center text-xs text-gray-500"></footer>
+  <footer class="mt-8 text-center text-xs text-gray-500">George Toliakis</footer>
 
 <script>
-/* ---------- CSV SOURCES (το νέο extra πρώτο) ---------- */
-const CSV_SOURCES = [
-  "netlify/functions/data/ydravlika_katholiko_teras_all_extra.csv", // ΝΕΟ: Κωδικός + Όνομα
-  "netlify/functions/data/ydravlika_katholiko_teras_ALL.csv",   // παλιό: Περιγραφή + Κατηγορία
-  // Προαιρετικά raw fallbacks:
-  //"https://raw.githubusercontent.com/<USER>/<REPO>/main/data/ydravlika_katholiko_teras_extra.csv",
+/* ---------- CSV GROUPS (φορτώνουμε ΚΑΙ τα δύο) ---------- */
+// ΟΜΑΔΑ Α: νέο extra (Κωδικός,Όνομα)
+const SOURCES_EXTRA = [
+  "netlify/functions/data/ydravlika_katholiko_teras_all_extra.csv"
+  // μπορείς να προσθέσεις και raw GitHub mirror εδώ αν θέλεις
+];
+// ΟΜΑΔΑ Β: παλιό καθολικό (Περιγραφή,Κατηγορία)
+const SOURCES_MAIN = [
+  "netlify/functions/data/ydravlika_katholiko_teras_ALL.csv",
   "https://raw.githubusercontent.com/Mzogler/ydravlika-order-app/main/ydravlika_katholiko_teras_ALL.csv",
   "https://cdn.jsdelivr.net/gh/Mzogler/ydravlika-order-app@main/ydravlika_katholiko_teras_ALL.csv"
 ];
 
 /* ---------- STATE ---------- */
-let ALL = [];  // [{primary, secondary, _nPrimary, _nSecondary}]
+let ALL = [];           // [{primary, secondary, _nPrimary, _nSecondary, schema}]
 let FILTERED = [];
 let CART = JSON.parse(localStorage.getItem('cart') || '[]');
 let PAGE = 1;
 const PAGE_SIZE = 200;
 
-/* Δυναμικές ετικέτες για headers/exports */
-let PRIMARY_LABEL = "Όνομα";     // εμφανίζεται bold
-let SECONDARY_LABEL = "Κωδικός"; // εμφανίζεται μικρό
-
 const statusEl  = document.getElementById('status');
 const resultsEl = document.getElementById('results');
 const resultCountEl = document.getElementById('resultCount');
 const pageInfoEl = document.getElementById('pageInfo');
+
+/* ---------- Labels (συνεπείς για μεικτά schemas) ---------- */
+// Χρησιμοποιούμε κοινές ετικέτες για να «χωρέσουν» και τα δύο σχήματα:
+const PRIMARY_LABEL  = "Περιγραφή / Όνομα";
+const SECONDARY_LABEL= "Κατηγορία / Κωδικός";
 
 /* ---------- Normalize (χωρίς τόνους/κεφαλαία, ς→σ) ---------- */
 function norm(s){
@@ -112,7 +109,7 @@ function norm(s){
   return s.trim();
 }
 
-/* ---------- Fetch CSV text (με timeout & sanity check) ---------- */
+/* ---------- Fetch CSV text (timeout + sanity) ---------- */
 async function fetchText(url, timeoutMs=12000){
   const ctrl = new AbortController();
   const t = setTimeout(()=>ctrl.abort(), timeoutMs);
@@ -126,91 +123,113 @@ async function fetchText(url, timeoutMs=12000){
   } finally { clearTimeout(t); }
 }
 
-/* ---------- Parse CSV string με Papa (worker) ---------- */
+/* ---------- Parse CSV string (Papa worker) ---------- */
 function parseCsvString(csvText){
   return new Promise((resolve,reject)=>{
     Papa.parse(csvText, { header:true, skipEmptyLines:true, worker:true,
-      complete: r => resolve(r.data),
+      complete: r => resolve({rows:r.data, fields:r.meta.fields||[]}),
       error: e => reject(e)
     });
   });
 }
 
-/* ---------- Φόρτωμα από πολλαπλές πηγές ---------- */
-async function loadCsvWithFallback(){
-  let lastErr = null;
-  for(const src of CSV_SOURCES){
-    try{
-      statusEl.textContent = "Φόρτωση CSV από: " + src;
-      const txt = await fetchText(src);
-      const data = await parseCsvString(txt);
-      if(Array.isArray(data) && data.length){ return data; }
-      lastErr = new Error('Empty parsed data from '+src);
-    }catch(e){ lastErr = e; }
+/* ---------- Detect schema of a CSV file ---------- */
+function detectSchema(fields){
+  // 1) Ακριβές Κωδικός/Όνομα
+  if (fields.includes('Κωδικός') && fields.includes('Όνομα')){
+    return { type:'CODE_NAME', primaryKey:'Όνομα', secondaryKey:'Κωδικός' };
   }
-  throw lastErr || new Error('All CSV sources failed');
-}
-
-/* ---------- Σχήμα: explicit check πρώτα για Κωδικός/Όνομα ---------- */
-function detectSchema(sample){
-  const keys = Object.keys(sample||{});
-  if (keys.length === 0) return { type:'UNKNOWN', keys };
-
-  // 1) Ακριβή headers: Κωδικός + Όνομα
-  const hasExactCode = keys.includes('Κωδικός');
-  const hasExactName = keys.includes('Όνομα');
-  if (hasExactCode && hasExactName){
-    return {
-      type: 'CODE_NAME',
-      primaryKey: 'Όνομα',      // το Όνομα θα προβάλλεται πρώτο (bold)
-      secondaryKey: 'Κωδικός',
-      primaryLabel: 'Όνομα',
-      secondaryLabel: 'Κωδικός'
-    };
+  // 2) Ακριβές Περιγραφή/Κατηγορία
+  if (fields.includes('Περιγραφή') && fields.includes('Κατηγορία')){
+    return { type:'DESC_CAT', primaryKey:'Περιγραφή', secondaryKey:'Κατηγορία' };
   }
-
-  // 2) Alias-based
+  // 3) Aliases (πιο χαλαρό)
   const map = {};
-  for (const k of keys){
+  for (const k of fields){
     const nk = norm(k).replace(/[^a-zα-ω0-9]/g,'');
     map[nk] = k;
   }
-
-  // A: Περιγραφή + Κατηγορία
   const descKey = map['περιγραφη'] || map['perigrafi'] || map['description'] || map['desc'];
   const catKey  = map['κατηγορια'] || map['katigoria'] || map['category'] || map['cat'];
   if (descKey && catKey){
-    return { type:'DESC_CAT', primaryKey: descKey, secondaryKey: catKey, primaryLabel: 'Περιγραφή', secondaryLabel: 'Κατηγορία' };
+    return { type:'DESC_CAT', primaryKey: descKey, secondaryKey: catKey };
   }
-
-  // B: Κωδικός + Όνομα (aliases)
   const codeKey = map['κωδικος'] || map['kodikos'] || map['code'] || map['id'];
   const nameKey = map['ονομα']   || map['onoma']   || map['name'] || map['title'];
   if (codeKey && nameKey){
-    return { type:'CODE_NAME', primaryKey: nameKey, secondaryKey: codeKey, primaryLabel: 'Όνομα', secondaryLabel: 'Κωδικός' };
+    return { type:'CODE_NAME', primaryKey: nameKey, secondaryKey: codeKey };
   }
-
-  return { type:'UNKNOWN', keys };
+  return { type:'UNKNOWN', fields };
 }
 
-/* ---------- Μετατροπή data σε unified ALL ---------- */
-function buildAll(data, schema){
-  // Ρυθμίζουμε labels για UI/PDF/CSV
-  window.PRIMARY_LABEL = schema.primaryLabel;
-  window.SECONDARY_LABEL = schema.secondaryLabel;
-
-  return data.map(r=>{
+/* ---------- Build entries for one CSV ---------- */
+function rowsToEntries(rows, schema){
+  return rows.map(r=>{
     const primary   = (r[schema.primaryKey]   ?? '').toString();
     const secondary = (r[schema.secondaryKey] ?? '').toString();
     return {
       primary, secondary,
       _nPrimary: norm(primary),
-      _nSecondary: norm(secondary)
+      _nSecondary: norm(secondary),
+      schema: schema.type // για debug/μελλοντική χρήση
     };
   });
 }
 
-/* ---------- Αναζήτηση (debounced) ---------- */
+/* ---------- Load ONE list of sources (first-success) ---------- */
+async function loadFirstAvailable(sources){
+  for(const src of sources){
+    try{
+      const txt = await fetchText(src);
+      const parsed = await parseCsvString(txt);
+      const schema = detectSchema(parsed.fields);
+      if(schema.type === 'UNKNOWN'){
+        console.warn('[CSV] Unknown schema @', src, parsed.fields);
+        continue;
+      }
+      const entries = rowsToEntries(parsed.rows, schema);
+      return { entries, count: entries.length, src, schema: schema.type };
+    }catch(e){
+      console.warn('[CSV] fail @', src, e.message);
+      continue;
+    }
+  }
+  // κανένα source δεν πέτυχε
+  return { entries: [], count: 0, src: null, schema:null };
+}
+
+/* ---------- Load BOTH groups, merge, dedupe ---------- */
+async function loadBothGroups(){
+  const [extra, main] = await Promise.all([
+    loadFirstAvailable(SOURCES_EXTRA),
+    loadFirstAvailable(SOURCES_MAIN)
+  ]);
+
+  const parts = [];
+  let note = [];
+
+  if(extra.count>0){ parts.push(extra.entries); note.push(`Extra: ${extra.count} (${extra.schema})`); }
+  else{ note.push('Extra: 0 (δεν βρέθηκε)'); }
+
+  if(main.count>0){ parts.push(main.entries); note.push(`Main: ${main.count} (${main.schema})`); }
+  else{ note.push('Main: 0 (δεν βρέθηκε)'); }
+
+  // merge
+  let merged = [].concat(...parts);
+
+  // dedupe by (primary|secondary)
+  const seen = new Set();
+  merged = merged.filter(x=>{
+    const key = x.primary+'|'+x.secondary;
+    if(seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return { merged, note: note.join(' • ') };
+}
+
+/* ---------- Filtering (debounced) ---------- */
 let debounceTimer=null;
 function applyFiltersDebounced(){ clearTimeout(debounceTimer); debounceTimer=setTimeout(applyFilters, 200); }
 function applyFilters(){
@@ -219,9 +238,10 @@ function applyFilters(){
   PAGE = 1; renderPage();
 }
 
-/* ---------- Σελιδοποίηση & Render ---------- */
+/* ---------- Paging / Render ---------- */
 function pageCount(){ return Math.max(1, Math.ceil(FILTERED.length/PAGE_SIZE)); }
 function pageSlice(){ const s=(PAGE-1)*PAGE_SIZE; return FILTERED.slice(s, s+PAGE_SIZE); }
+
 function renderPage(){
   resultsEl.innerHTML='';
   const frag = document.createDocumentFragment();
@@ -233,8 +253,8 @@ function renderPage(){
     const div = document.createElement('div'); div.className='row';
 
     const left = document.createElement('div'); left.className='flex-1';
-    const t = document.createElement('div'); t.className='font-medium'; t.textContent = r.primary;        // Όνομα ή Περιγραφή
-    const s = document.createElement('div'); s.className='text-xs text-gray-500'; s.textContent = r.secondary; // Κωδικός ή Κατηγορία
+    const t = document.createElement('div'); t.className='font-medium'; t.textContent = r.primary;        // Περιγραφή/Όνομα
+    const s = document.createElement('div'); s.className='text-xs text-gray-500'; s.textContent = r.secondary; // Κατηγορία/Κωδικός
     left.appendChild(t); left.appendChild(s);
 
     const qty = document.createElement('input');
@@ -249,7 +269,7 @@ function renderPage(){
   pageInfoEl.textContent = `${PAGE} / ${pageCount()}`;
 }
 
-/* ---------- Καλάθι ---------- */
+/* ---------- Cart ---------- */
 function saveCart(){ localStorage.setItem('cart', JSON.stringify(CART)); renderCart(); }
 function syncQty(item,val){
   const key=item.primary+'|'+item.secondary;
@@ -309,7 +329,7 @@ async function exportPDF(){
     const rows=CART.map((x,i)=>[i+1,x.primary,x.secondary,x.qty]);
     doc.autoTable({
       startY:80,
-      head:[['#', PRIMARY_LABEL, SECONDARY_LABEL, 'Ποσ.']],
+      head:[['#', 'Περιγραφή / Όνομα', 'Κατηγορία / Κωδικός', 'Ποσ.']],
       body:rows,
       styles:{font:'NotoSans',fontSize:9},
       headStyles:{fillColor:[0,0,0]}
@@ -320,49 +340,31 @@ async function exportPDF(){
   }
 }
 
-/* ---------- Email (Netlify Function) ---------- */
-async function sendEmail(){
-  const name=document.getElementById('custName').value.trim();
-  const email=document.getElementById('custEmail').value.trim();
-  const notes=document.getElementById('custNotes').value.trim();
-  if(!email){ alert('Συμπλήρωσε email'); return; }
-  if(CART.length===0){ alert('Καλάθι άδειο'); return; }
-  const payload={ customer:{name,email,notes}, items:CART, labels:{primary:PRIMARY_LABEL, secondary:SECONDARY_LABEL} };
-  const res=await fetch('/.netlify/functions/sendOrder',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
-  if(res.ok) alert('Email στάλθηκε'); else alert('Αποτυχία: '+await res.text());
-}
-
 /* ---------- Events ---------- */
 document.getElementById('searchInput').addEventListener('input', applyFiltersDebounced);
 document.getElementById('prevPage').onclick=()=>{ if(PAGE>1){ PAGE--; renderPage(); } };
 document.getElementById('nextPage').onclick=()=>{ const pc=Math.max(1,Math.ceil(FILTERED.length/PAGE_SIZE)); if(PAGE<pc){ PAGE++; renderPage(); } };
 document.getElementById('exportPdfBtn').onclick=exportPDF;
-document.getElementById('sendEmailBtn').onclick=sendEmail;
 document.getElementById('clearCart').onclick=()=>{ CART=[]; saveCart(); renderPage(); };
 document.getElementById('downloadCartCsv').onclick=()=>{
   if(CART.length===0){ alert('Άδειο'); return; }
-  const header=`${PRIMARY_LABEL},${SECONDARY_LABEL},Ποσότητα\n`;
+  const header='Περιγραφή / Όνομα,Κατηγορία / Κωδικός,Ποσότητα\n';
   const body=CART.map(x=>`"${(x.primary||'').replaceAll('"','""')}","${(x.secondary||'').replaceAll('"','""')}",${x.qty}`).join('\n');
   const blob=new Blob(["\ufeff"+header+body],{type:'text/csv;charset=utf-8;'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='cart.csv'; a.click();
 };
 
-/* ---------- Boot ---------- */
+/* ---------- Boot (load BOTH) ---------- */
 (async()=>{
   try{
-    statusEl.textContent='Φόρτωση CSV...';
-    const data = await loadCsvWithFallback();
-    const sample = data && data[0] || {};
-    const schema = detectSchema(sample);
-
-    if(schema.type === 'UNKNOWN'){
-      throw new Error('Άγνωστο schema. Headers: '+JSON.stringify(Object.keys(sample||{})));
+    statusEl.textContent='Φόρτωση CSVs...';
+    const { merged, note } = await loadBothGroups();
+    if(merged.length===0){
+      throw new Error('Δεν βρέθηκαν διαθέσιμα CSV (ούτε extra ούτε main).');
     }
-
-    ALL = buildAll(data, schema);
+    ALL = merged;
     FILTERED = ALL;
-
-    statusEl.textContent = `Φορτώθηκαν ${ALL.length.toLocaleString('el-GR')} γραμμές.`;
+    statusEl.textContent = `Συνολικά ${ALL.length.toLocaleString('el-GR')} γραμμές • ${note}`;
     renderPage(); renderCart();
   }catch(e){
     console.error('CSV load error', e);
