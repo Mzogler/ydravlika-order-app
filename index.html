@@ -314,31 +314,51 @@ async function loadGreekFont(){
   return btoa(binary);
 }
 async function exportPDF(){
+  const prev = localStorage.getItem('orderName') || 'Παραγγελία';
+  const input = prompt('Όνομα παραγγελίας / Όνομα αρχείου PDF:', prev);
+  if (input === null) return;
+  const orderName = (input.trim() || 'Παραγγελία');
+  localStorage.setItem('orderName', orderName);
+
+  const safeName = (orderName.replace(/[\\/:*?"<>|]/g, '-').substring(0,120) || 'Paraggelia');
+  const fileName = safeName.endsWith('.pdf') ? safeName : (safeName + '.pdf');
+
   try{
-    const { jsPDF }=window.jspdf;
-    const doc=new jsPDF({unit:'pt',format:'a4'});
-    const base64=await loadGreekFont();
-    doc.addFileToVFS('NotoSans-Regular.ttf',base64);
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit:'pt', format:'a4' });
+    const base64 = await loadGreekFont();
+    doc.addFileToVFS('NotoSans-Regular.ttf', base64);
     doc.addFont('NotoSans-Regular.ttf','NotoSans','normal');
     doc.setFont('NotoSans');
 
     const date = new Date().toLocaleString('el-GR');
-    doc.setFontSize(14); doc.text('Παραγγελία Υδραυλικών',40,40);
-    doc.setFontSize(10); doc.text(`Ημ/νία: ${date}`,40,58);
+    const rows = CART.map((x,i)=>[i+1,x.primary,x.secondary,x.qty]);
 
-    const rows=CART.map((x,i)=>[i+1,x.primary,x.secondary,x.qty]);
     doc.autoTable({
-      startY:80,
-      head:[['#', 'Περιγραφή / Όνομα', 'Κατηγορία / Κωδικός', 'Ποσ.']],
-      body:rows,
-      styles:{font:'NotoSans',fontSize:9},
-      headStyles:{fillColor:[0,0,0]}
+      startY: 80,
+      head: [['#','Περιγραφή / Όνομα','Κατηγορία / Κωδικός','Ποσ.']],
+      body: rows,
+      styles: { font:'NotoSans', fontSize:9 },
+      headStyles: { fillColor:[0,0,0] },
+      didDrawPage: (data) => {
+        const pageWidth = doc.internal.pageSize.getWidth();
+        doc.setFontSize(14);
+        doc.text('Παραγγελία Υδραυλικών',40,40);
+        doc.setFontSize(10);
+        doc.text(`Ημ/νία: ${date}`,40,58);
+        // το όνομα πάνω δεξιά
+        doc.text(orderName, pageWidth - 40, 40, { align: 'right' });
+      },
+      margin: { top: 80 }
     });
-    doc.save('paraggelia.pdf');
+
+    doc.save(fileName);
   }catch(e){
-    alert('Σφάλμα PDF: '+e.message+' (έλεγξε /fonts/NotoSans-Regular.ttf)');
+    alert('Σφάλμα PDF: '+ e.message +' (έλεγξε /fonts/NotoSans-Regular.ttf)');
   }
 }
+document.getElementById('exportPdfBtn').onclick = exportPDF;
+
 
 /* ---------- Events ---------- */
 document.getElementById('searchInput').addEventListener('input', applyFiltersDebounced);
