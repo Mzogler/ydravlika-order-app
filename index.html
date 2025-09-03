@@ -86,8 +86,8 @@ let PAGE = 1;
 const PAGE_SIZE = 200;
 
 /* Δείκτες labels για δυναμικά headers/exports (ανά schema) */
-let PRIMARY_LABEL = "Κωδικός";     // εμφανίζεται bold
-let SECONDARY_LABEL = "Όνομα"; // εμφανίζεται μικρό
+let PRIMARY_LABEL = "Όνομα";     // εμφανίζεται bold
+let SECONDARY_LABEL = "Κωδικός"; // εμφανίζεται μικρό
 let PDF_HEAD = ['#', PRIMARY_LABEL, SECONDARY_LABEL, 'Ποσ.'];
 
 const statusEl  = document.getElementById('status');
@@ -162,8 +162,8 @@ function detectSchema(sample){
     return { type:'DESC_CAT', primaryKey: descKey, secondaryKey: catKey, primaryLabel: 'Περιγραφή', secondaryLabel: 'Κατηγορία' };
   }
   // Option B: Κωδικός + Όνομα
-  const codeKey = map['κωδικος'] || map['kodikos'] || map['code'] || map['id'];
-  const nameKey = map['ονομα']   || map['onoma']   || map['name'] || map['title'];
+  const codeKey = map['Κωδικός'] || map['kodikos'] || map['code'] || map['id'];
+  const nameKey = map['Όνομα']   || map['onoma']   || map['name'] || map['title'];
   if(codeKey && nameKey){
     // εδώ θέλουμε να εμφανίζουμε πρώτο το Όνομα (primary) και δεύτερο τον Κωδικό
     return { type:'CODE_NAME', primaryKey: nameKey, secondaryKey: codeKey, primaryLabel: 'Όνομα', secondaryLabel: 'Κωδικός' };
