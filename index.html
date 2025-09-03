@@ -364,7 +364,7 @@ document.getElementById('downloadCartCsv').onclick=()=>{
     }
     ALL = merged;
     FILTERED = ALL;
-    statusEl.textContent = `Συνολικά ${ALL.length.toLocaleString('el-GR')} γραμμές • ${note}`;
+    statusEl.textContent = `Συνολικά ${ALL.length.toLocaleString('el-GR')} γραμμές.`;
     renderPage(); renderCart();
   }catch(e){
     console.error('CSV load error', e);
