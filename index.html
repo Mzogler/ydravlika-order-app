@@ -362,7 +362,7 @@ document.getElementById('downloadCartCsv').onclick=()=>{
     ALL = buildAll(data, schema);
     FILTERED = ALL;
 
-    statusEl.textContent = `Φορτώθηκαν ${ALL.length.toLocaleString('el-GR')} γραμμές. Schema: ${schema.type} (${schema.primaryLabel}/${schema.secondaryLabel})`;
+    statusEl.textContent = `Φορτώθηκαν ${ALL.length.toLocaleString('el-GR')} γραμμές.`;
     renderPage(); renderCart();
   }catch(e){
     console.error('CSV load error', e);
