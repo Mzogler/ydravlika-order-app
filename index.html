@@ -66,13 +66,12 @@
   <footer class="mt-8 text-center text-xs text-gray-500">George Toliakis</footer>
 
 <script>
-/* ---------- CSV GROUPS (φορτώνουμε ΚΑΙ τα δύο) ---------- */
-// ΟΜΑΔΑ Α: νέο extra (Κωδικός,Όνομα)
+/* ---------- CSV GROUPS  ---------- */
+// ΟΜΑΔΑ Α:  (Κωδικός,Όνομα)
 const SOURCES_EXTRA = [
   "netlify/functions/data/ydravlika_katholiko_teras_all_extra.csv"
-  // μπορείς να προσθέσεις και raw GitHub mirror εδώ αν θέλεις
 ];
-// ΟΜΑΔΑ Β: παλιό καθολικό (Περιγραφή,Κατηγορία)
+// ΟΜΑΔΑ Β:  (Περιγραφή,Κατηγορία)
 const SOURCES_MAIN = [
   "netlify/functions/data/ydravlika_katholiko_teras_ALL.csv",
   "https://raw.githubusercontent.com/Mzogler/ydravlika-order-app/main/ydravlika_katholiko_teras_ALL.csv",
@@ -91,8 +90,8 @@ const resultsEl = document.getElementById('results');
 const resultCountEl = document.getElementById('resultCount');
 const pageInfoEl = document.getElementById('pageInfo');
 
-/* ---------- Labels (συνεπείς για μεικτά schemas) ---------- */
-// Χρησιμοποιούμε κοινές ετικέτες για να «χωρέσουν» και τα δύο σχήματα:
+/* ---------- Labels  ---------- */
+// Χρησιμοποιούμε κοινές ετικέτες  και για τα δύο σχήματα:
 const PRIMARY_LABEL  = "Περιγραφή / Όνομα";
 const SECONDARY_LABEL= "Κατηγορία / Κωδικός";
 
