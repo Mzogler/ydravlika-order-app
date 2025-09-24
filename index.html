@@ -140,8 +140,8 @@ function detectSchema(fields){
     return { type:'CODE_NAME', primaryKey:'Όνομα', secondaryKey:'Κωδικός' };
   }
   // 2) Ακριβές Περιγραφή/Κατηγορία
-  if (fields.includes('Περιγραφή') && fields.includes('Κατηγορία')){
-    return { type:'DESC_CAT', primaryKey:'Περιγραφή', secondaryKey:'Κατηγορία' };
+  if (fields.includes('Περιγραφή') {
+    return { type:'DESC_CAT', primaryKey:'Περιγραφή',};
   }
   // 3) Aliases (πιο χαλαρό)
   const map = {};
