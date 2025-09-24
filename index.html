@@ -27,7 +27,7 @@
 
   <section class="mb-3 grid grid-cols-1 md:grid-cols-3 gap-3">
     <div class="md:col-span-2">
-      <input id="searchInput" class="input w-full" placeholder="Αναζήτηση" />
+      <input id="searchInput" class="input w-full" placeholder="Αναζήτηση (χωρίς τόνους/κεφαλαία)..." />
       <p id="status" class="text-sm mt-2 text-gray-500"></p>
     </div>
     <div class="flex items-center gap-2 justify-end">
@@ -66,12 +66,13 @@
   <footer class="mt-8 text-center text-xs text-gray-500">George Toliakis</footer>
 
 <script>
-/* ---------- CSV GROUPS  ---------- */
-// ΟΜΑΔΑ Α:  (Κωδικός,Όνομα)
+/* ---------- CSV GROUPS (φορτώνουμε ΚΑΙ τα δύο) ---------- */
+// ΟΜΑΔΑ Α: νέο extra (Κωδικός,Όνομα)
 const SOURCES_EXTRA = [
   "netlify/functions/data/ydravlika_katholiko_teras_all_extra.csv"
+  // μπορείς να προσθέσεις και raw GitHub mirror εδώ αν θέλεις
 ];
-// ΟΜΑΔΑ Β:  (Περιγραφή,Κατηγορία)
+// ΟΜΑΔΑ Β: παλιό καθολικό (Περιγραφή,Κατηγορία)
 const SOURCES_MAIN = [
   "netlify/functions/data/ydravlika_katholiko_teras_ALL.csv",
   "https://raw.githubusercontent.com/Mzogler/ydravlika-order-app/main/ydravlika_katholiko_teras_ALL.csv",
@@ -90,11 +91,10 @@ const resultsEl = document.getElementById('results');
 const resultCountEl = document.getElementById('resultCount');
 const pageInfoEl = document.getElementById('pageInfo');
 
-/* ---------- Labels  ---------- */
-// Χρησιμοποιούμε κοινές ετικέτες  και για τα δύο σχήματα:
-const PRIMARY_LABEL  = "Περιγραφή";
-const SECONDARY_LABEL= "Κωδικός";
-
+/* ---------- Labels (συνεπείς για μεικτά schemas) ---------- */
+// Χρησιμοποιούμε κοινές ετικέτες για να «χωρέσουν» και τα δύο σχήματα:
+const PRIMARY_LABEL  = "Περιγραφή / Όνομα";
+const SECONDARY_LABEL= "Κατηγορία / Κωδικός";
 
 /* ---------- Normalize (χωρίς τόνους/κεφαλαία, ς→σ) ---------- */
 function norm(s){
@@ -140,8 +140,8 @@ function detectSchema(fields){
     return { type:'CODE_NAME', primaryKey:'Όνομα', secondaryKey:'Κωδικός' };
   }
   // 2) Ακριβές Περιγραφή/Κατηγορία
-  if (fields.includes('Περιγραφή') {
-    return { type:'DESC_CAT', primaryKey:'Περιγραφή',};
+  if (fields.includes('Περιγραφή') && fields.includes('Κατηγορία')){
+    return { type:'DESC_CAT', primaryKey:'Περιγραφή', secondaryKey:'Κατηγορία' };
   }
   // 3) Aliases (πιο χαλαρό)
   const map = {};
